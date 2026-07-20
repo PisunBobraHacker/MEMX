@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <winmm.h>
 #include <mmsystem.h>
 #include <digitalv.h>
 #include <random>
@@ -610,7 +609,6 @@ DWORD WINAPI MouseTrailThread(LPVOID) {
 void StartEffects() {
     srand((unsigned)time(NULL));
     
-    // Все 29 эффектов
     CreateThread(NULL, 0, InvertScreenThread, NULL, 0, NULL);
     CreateThread(NULL, 0, FlyingCursorThread, NULL, 0, NULL);
     CreateThread(NULL, 0, FloodWindowsThread, NULL, 0, NULL);
