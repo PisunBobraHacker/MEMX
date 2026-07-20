@@ -18,7 +18,7 @@ jobs:
     - name: Build
       shell: cmd
       run: |
-        cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp /link user32.lib gdi32.lib winmm.lib winioctl.lib shell32.lib ole32.lib uuid.lib /SUBSYSTEM:WINDOWS /OUT:memx.exe
+        cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib /SUBSYSTEM:WINDOWS /OUT:memx.exe
     
     - name: Upload
       uses: actions/upload-artifact@v4
