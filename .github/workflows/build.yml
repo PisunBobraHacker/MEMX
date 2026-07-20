@@ -16,6 +16,7 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
     
     - name: Build
+      shell: cmd
       run: |
         cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp /link user32.lib gdi32.lib winmm.lib winioctl.lib shell32.lib ole32.lib uuid.lib /SUBSYSTEM:WINDOWS /OUT:memx.exe
     
