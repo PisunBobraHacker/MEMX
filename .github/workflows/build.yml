@@ -24,51 +24,20 @@ jobs:
           cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp ^
           /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
           /SUBSYSTEM:WINDOWS /OUT:memx.exe
+          dir memx.exe
 
-      - name: Download 7z SFX
-        shell: cmd
+      - name: Check file size
+        shell: bash
         run: |
-          curl -L -o 7zr.exe https://www.7-zip.org/a/7zr.exe
-          curl -L -o 7zS.sfx https://www.7-zip.org/a/7zS.sfx
+          ls -la memx.exe
+          if [ ! -f memx.exe ] || [ $(stat -c%s memx.exe) -lt 10000 ]; then
+            echo "❌ memx.exe слишком маленький или не существует!"
+            exit 1
+          fi
 
-      - name: Pack to SFX
-        shell: cmd
-        run: |
-          mkdir sfx
-          copy memx.exe sfx\
-          cd sfx
-          7zr a -r memx.7z memx.exe
-          cd ..
-          copy /b 7zS.sfx + sfx\memx.7z memx_installer.exe
-
-      - name: Delete old releases with tag memx-*
-        uses: actions/github-script@v7
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const { data: releases } = await github.rest.repos.listReleases({ owner, repo });
-            for (const release of releases) {
-              if (release.tag_name.startsWith('memx-')) {
-                console.log(`Deleting release: ${release.tag_name}`);
-                await github.rest.repos.deleteRelease({ owner, repo, release_id: release.id });
-                try {
-                  await github.rest.git.deleteRef({ owner, repo, ref: `tags/${release.tag_name}` });
-                } catch(e) {}
-              }
-            }
-
-      - name: Create NEW Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: memx_installer.exe
-          tag_name: memx-${{ github.run_id }}
-          name: "💀 MEMX #${{ github.run_number }}"
-          body: |
-            ## MEMX INSTALLER
-            
-            Скачай и запусти **memx_installer.exe**
-            
-            ⚠️ ТОЛЬКО В ВИРТУАЛКЕ!
-          draft: false
-          prerelease: true
+          name: memx-installer
+          path: memx.exe
+          retention-days: 30
