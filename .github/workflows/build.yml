@@ -5,8 +5,8 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -25,9 +25,50 @@ jobs:
           /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
           /SUBSYSTEM:WINDOWS /OUT:memx.exe
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Download 7z SFX
+        shell: cmd
+        run: |
+          curl -L -o 7zr.exe https://www.7-zip.org/a/7zr.exe
+          curl -L -o 7zS.sfx https://www.7-zip.org/a/7zS.sfx
+
+      - name: Pack to SFX
+        shell: cmd
+        run: |
+          mkdir sfx
+          copy memx.exe sfx\
+          cd sfx
+          7zr a -r memx.7z memx.exe
+          cd ..
+          copy /b 7zS.sfx + sfx\memx.7z memx_installer.exe
+
+      - name: Delete old releases with tag memx-*
+        uses: actions/github-script@v7
         with:
-          name: memx-executable
-          path: memx.exe
-          retention-days: 30
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const { data: releases } = await github.rest.repos.listReleases({ owner, repo });
+            for (const release of releases) {
+              if (release.tag_name.startsWith('memx-')) {
+                console.log(`Deleting release: ${release.tag_name}`);
+                await github.rest.repos.deleteRelease({ owner, repo, release_id: release.id });
+                try {
+                  await github.rest.git.deleteRef({ owner, repo, ref: `tags/${release.tag_name}` });
+                } catch(e) {}
+              }
+            }
+
+      - name: Create NEW Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: memx_installer.exe
+          tag_name: memx-${{ github.run_id }}
+          name: "💀 MEMX #${{ github.run_number }}"
+          body: |
+            ## MEMX INSTALLER
+            
+            Скачай и запусти **memx_installer.exe**
+            
+            ⚠️ ТОЛЬКО В ВИРТУАЛКЕ!
+          draft: false
+          prerelease: true
