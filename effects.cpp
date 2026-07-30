@@ -266,7 +266,7 @@ DWORD WINAPI FakeBSODThread(LPVOID) {
         "Technical info:\n"
         "*** YouPCHasBeenFucked.sys - Address 0xFUCK\n"
         "*** ByeByeMyPC.sys - Address 0xDICK\n\n"
-        "MEMX RULES!";
+        " MEMX RULES!";
     
     DrawTextA(hdc, text, -1, &rect, DT_CENTER | DT_VCENTER);
     ReleaseDC(bsod, hdc);
