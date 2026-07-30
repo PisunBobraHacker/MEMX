@@ -260,12 +260,12 @@ DWORD WINAPI FakeBSODThread(LPVOID) {
     SetBkMode(hdc, TRANSPARENT);
     
     const char* text = 
-        "*** STOP: 0xDEADBEEF (MEMX_INFECTION)\n\n"
+        "*** STOP: 0xFUCKYOU (MEMX_INFECTION)\n\n"
         "Your PC ran into a problem and needs to restart.\n"
         "Error: MEMX detected in kernel memory.\n\n"
         "Technical info:\n"
-        "*** MEMX_DRIVER.sys - Address 0xDEADBEEF\n"
-        "*** MEMX_ROOTKIT.sys - Address 0xCAFEBABE\n\n"
+        "*** YouPCHasBeenFucked.sys - Address 0xFUCK\n"
+        "*** ByeByeMyPC.sys - Address 0xDICK\n\n"
         "MEMX RULES!";
     
     DrawTextA(hdc, text, -1, &rect, DT_CENTER | DT_VCENTER);
