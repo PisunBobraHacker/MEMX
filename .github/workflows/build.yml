@@ -1,4 +1,4 @@
-эname: Build MEMX
+name: Build MEMX
 
 on:
   push:
