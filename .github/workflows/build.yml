@@ -25,6 +25,12 @@ jobs:
           /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
           /SUBSYSTEM:WINDOWS /ENTRY:WinMainCRTStartup /OUT:memx.exe
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: memx
+          path: memx.exe
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
