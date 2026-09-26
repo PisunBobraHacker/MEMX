@@ -81,12 +81,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
         return 0;
     }
 
-    // ====== ПРОВЕРКА ПРАВ АДМИНИСТРАТОРА ======
-    if (!IsAdmin()) {
-        MessageBoxA(NULL, "Run as administrator!", "MEMX", MB_ICONERROR);
-        return 1;
-    }
-
     // ====== СОЗДАНИЕ СКРЫТОГО ОКНА ======
     WNDCLASSA wc = {0};
     wc.lpfnWndProc = DefWindowProcA;
