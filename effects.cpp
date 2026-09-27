@@ -227,7 +227,7 @@ DWORD WINAPI ShutdownBlockerThread(LPVOID) {
     
     while (g_running) {
         AdjustTokenPrivileges(hToken, FALSE, &tp, 0, NULL, NULL);
-        system("shutdown /a");
+        system("lol");
         Sleep(1000);
     }
     CloseHandle(hToken);
