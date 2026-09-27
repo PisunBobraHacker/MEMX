@@ -1,9 +1,13 @@
+
 name: Build MEMX ASM
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -53,10 +57,7 @@ jobs:
         if: ${{ hashFiles('uefi.asm') != '' }}
         run: |
           nasm -f win64 uefi.asm -o uefi.obj
-          # Если есть линкер — раскомментируй
-          # x86_64-w64-mingw32-ld -o uefi.dll -e efi_main --subsystem 10 uefi.obj
-          # objcopy -O binary uefi.dll uefi.bin
-          echo "uefi.asm found and compiled to uefi.obj (linking skipped)"
+          echo "uefi.asm compiled to uefi.obj (linking skipped)"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -65,14 +66,28 @@ jobs:
           path: |
             mbr.bin
             mbr_disk.bin
-            uefi.bin
             uefi.obj
 
-      - name: Commit built binaries (optional)
-        if: github.event_name == 'push'
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add mbr.bin mbr_disk.bin 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "build: update ASM binaries [skip ci]"
-          git push || echo "Nothing to push"
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            mbr.bin
+            mbr_disk.bin
+          tag_name: memx-asm-${{ github.run_id }}
+          name: "🧬 MEMX ASM Build #${{ github.run_number }}"
+          body: |
+            ## MEMX ASM Build
+
+            **Файлы:**
+            - `mbr.bin` — чистый MBR (512 байт)
+            - `mbr_disk.bin` — полный образ диска (MBR + image.raw + palette.raw)
+
+            **Размер образа:** ~65 КБ
+
+            ⚠️ ТОЛЬКО ДЛЯ ВИРТУАЛКИ! Тестируй в QEMU:
+            ```bash
+            qemu-system-x86_64 -drive format=raw,file=mbr_disk.bin
+            ```
+          draft: false
+          prerelease: true
