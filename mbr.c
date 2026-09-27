@@ -11,7 +11,7 @@
 #pragma comment(lib, "urlmon.lib")
 
 // URL к образам (latest release)
-#define MBR_URL   "https://github.com/PisunBobraHacker/MEMX/releases/latest/download/mbr_disk.bin"
+#define MBR_URL   "https://github.com/PisunBobraHacker/MEMX/download/mbr_disk.bin"
 #define UEFI_URL  "https://github.com/PisunBobraHacker/MEMX/releases/latest/download/uefi.bin"
 
 typedef struct {
